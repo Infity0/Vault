@@ -1,0 +1,21 @@
+# ── Python / Desktop ──────────────────────────────────────────
+desktop/.venv/
+desktop/__pycache__/
+desktop/src/**/__pycache__/
+desktop/build/
+desktop/dist/
+desktop/*.log
+desktop/desktop_log.txt
+desktop/build_log.txt
+desktop/xref-*.html
+desktop/warn-*.txt
+
+# ── Flutter / Mobile ──────────────────────────────────────────
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.idea/
+mobile/pubspec.lock
+mobile/*.iml
+mobile/.metadata
