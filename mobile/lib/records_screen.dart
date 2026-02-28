@@ -39,14 +39,16 @@ class _RecordsScreenState extends State<RecordsScreen> {
   Future<void> _loadAll() async {
     try {
       final cats = await ApiService().getCategories();
+      if (!mounted) return;
       setState(() => _categories = [_allCategory, _favCategory, _expiringCategory, ...cats]);
       await _loadRecords();
     } catch (e) {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _loadRecords() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final records = await ApiService().getRecords(
@@ -61,6 +63,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
 
   Future<void> _search(String q) async {
     if (q.isEmpty) { _loadRecords(); return; }
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final results = await ApiService().search(q);
@@ -174,7 +177,13 @@ class _RecordsScreenState extends State<RecordsScreen> {
                 final color = _parseColor(cat.color);
                 return GestureDetector(
                   onTap: () {
-                    setState(() => _selectedCategory = cat.key);
+                    setState(() {
+                      _selectedCategory = cat.key;
+                      if (_searching) {
+                        _searching = false;
+                        _searchCtrl.clear();
+                      }
+                    });
                     _loadRecords();
                   },
                   child: AnimatedContainer(
@@ -294,7 +303,7 @@ class _RecordsScreenState extends State<RecordsScreen> {
                                 }
                               },
                               onDismissed: (_) {
-                                setState(() => _records.removeAt(i));
+                                setState(() => _records.removeWhere((rec) => rec.id == r.id));
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text('«${r.title}» удалён'),
@@ -355,7 +364,10 @@ class _RecordsScreenState extends State<RecordsScreen> {
                                                 MaterialPageRoute(
                                                   builder: (_) => RecordDetailScreen(
                                                       recordId: r.id,
-                                                      categoryLabel: _categoryLabel(r.category)),
+                                                      categoryLabel: _categoryLabel(r.category),
+                                                      categoryInfo: _categories.where((c) => c.key == r.category).isNotEmpty
+                                                          ? _categories.firstWhere((c) => c.key == r.category)
+                                                          : null),
                                                 ),
                                               );
                                               if (result != null) _loadRecords();

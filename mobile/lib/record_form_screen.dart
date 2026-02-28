@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'api_service.dart';
@@ -38,6 +37,7 @@ class _RecordFormScreenState extends State<RecordFormScreen> {
     setState(() => _loading = true);
     try {
       final cats = await ApiService().getCategories();
+      if (!mounted) return;
       setState(() {
         _categories = cats;
         if (widget.record != null) {
@@ -70,8 +70,14 @@ class _RecordFormScreenState extends State<RecordFormScreen> {
 
   void _buildFieldControllers(String category,
       {Map<String, String> existing = const {}}) {
-    for (final c in _fieldControllers.values) {
-      c.dispose();
+
+    final oldControllers = Map<String, TextEditingController>.from(_fieldControllers);
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final c in oldControllers.values) {
+          c.dispose();
+        }
+      });
     }
     _fieldControllers.clear();
     final cat = _categories.firstWhere((c) => c.key == category,
@@ -492,7 +498,7 @@ class _RecordFormScreenState extends State<RecordFormScreen> {
                 ),
                 subtitle: Text(
                   () {
-                    final kb = (f.size ?? 0) / 1024;
+                    final kb = f.size / 1024;
                     return kb < 1024
                         ? '${kb.toStringAsFixed(1)} КБ'
                         : '${(kb / 1024).toStringAsFixed(1)} МБ';
@@ -544,43 +550,46 @@ class _RecordFormScreenState extends State<RecordFormScreen> {
     required TextEditingController controller,
   }) {
     const options = ['Visa', 'Mastercard', 'Мир', 'UnionPay', 'American Express', 'Другая'];
-    if (!options.contains(controller.text)) controller.text = options[0];
     return StatefulBuilder(
-      builder: (ctx, setLocal) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: controller.text,
-            dropdownColor: context.cardColor,
-            style: TextStyle(color: context.textPrimary, fontSize: 16),
-            isExpanded: true,
-            icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                color: Color(0xFF6c63ff)),
-            items: options
-                .map((t) => DropdownMenuItem(
-                      value: t,
-                      child: Row(
-                        children: [
-                          Icon(Icons.credit_card_outlined,
-                              color: context.textHint, size: 20),
-                          const SizedBox(width: 12),
-                          Text(t),
-                        ],
-                      ),
-                    ))
-                .toList(),
-            onChanged: (v) {
-              if (v == null) return;
-              setState(() => controller.text = v);
-              setLocal(() {});
-            },
+      builder: (ctx, setLocal) {
+        final currentValue =
+            options.contains(controller.text) ? controller.text : options[0];
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: context.cardColor,
+            borderRadius: BorderRadius.circular(14),
           ),
-        ),
-      ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: currentValue,
+              dropdownColor: context.cardColor,
+              style: TextStyle(color: context.textPrimary, fontSize: 16),
+              isExpanded: true,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: Color(0xFF6c63ff)),
+              items: options
+                  .map((t) => DropdownMenuItem(
+                        value: t,
+                        child: Row(
+                          children: [
+                            Icon(Icons.credit_card_outlined,
+                                color: context.textHint, size: 20),
+                            const SizedBox(width: 12),
+                            Text(t),
+                          ],
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => controller.text = v);
+                setLocal(() {});
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 

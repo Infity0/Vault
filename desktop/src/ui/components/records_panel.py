@@ -112,20 +112,34 @@ class RecordCard(ctk.CTkFrame):
         except Exception:
             return dt_str
 
-    def _bind_hover(self) -> None:
-        for widget in [self, *self.winfo_children()]:
-            widget.bind("<Enter>", self._on_enter, add="+")
-            widget.bind("<Leave>", self._on_leave, add="+")
-        self.bind("<Button-1>", self._on_click, add="+")
-
     def _on_enter(self, _=None) -> None:
         self.configure(fg_color=CARD_HOVER)
 
-    def _on_leave(self, _=None) -> None:
+    def _on_leave(self, event=None) -> None:
+
+        try:
+            x, y = self.winfo_pointerxy()
+            rx, ry = self.winfo_rootx(), self.winfo_rooty()
+            if rx <= x < rx + self.winfo_width() and ry <= y < ry + self.winfo_height():
+                return
+        except Exception:
+            pass
         self.configure(fg_color=CARD)
 
     def _on_click(self, _=None) -> None:
         self.on_click(self.record)
+
+    def _bind_hover(self) -> None:
+        self._bind_descendants(self)
+
+    def _bind_descendants(self, widget) -> None:
+        widget.bind("<Enter>", self._on_enter, add="+")
+        widget.bind("<Leave>", self._on_leave, add="+")
+        if isinstance(widget, ctk.CTkButton):
+            return
+        widget.bind("<Button-1>", self._on_click, add="+")
+        for child in widget.winfo_children():
+            self._bind_descendants(child)
 
 
 class RecordsPanel(ctk.CTkFrame):

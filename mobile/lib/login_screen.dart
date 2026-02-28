@@ -37,6 +37,14 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkBiometric();
   }
 
+  @override
+  void dispose() {
+    _userCtrl.dispose();
+    _passCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
   Future<bool> _deviceSupportsBiometric() async {
     try {
       final canCheck = await _localAuth.canCheckBiometrics;

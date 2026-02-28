@@ -12,7 +12,13 @@ import 'record_form_screen.dart';
 class RecordDetailScreen extends StatefulWidget {
   final int recordId;
   final String? categoryLabel;
-  const RecordDetailScreen({super.key, required this.recordId, this.categoryLabel});
+  final CategoryInfo? categoryInfo;
+  const RecordDetailScreen({
+    super.key,
+    required this.recordId,
+    this.categoryLabel,
+    this.categoryInfo,
+  });
 
   @override
   State<RecordDetailScreen> createState() => _RecordDetailScreenState();
@@ -45,6 +51,7 @@ class _RecordDetailScreenState extends State<RecordDetailScreen> {
   }
 
   Future<void> _loadAttachments() async {
+    if (!mounted) return;
     setState(() => _attachmentsLoading = true);
     try {
       final list = await ApiService().getAttachments(widget.recordId);
@@ -245,7 +252,7 @@ class _RecordDetailScreenState extends State<RecordDetailScreen> {
               final list = await ApiService().getAttachments(widget.recordId);
               if (mounted) {
                 setState(() => _attachments = list);
-                setSheet(() {});
+                try { setSheet(() {}); } catch (_) {}
               }
             } catch (_) {}
           }
@@ -543,10 +550,18 @@ class _RecordDetailScreenState extends State<RecordDetailScreen> {
 
           if (r.fields.isNotEmpty) ...[
             _sectionTitle('Поля'),
-            ...r.fields.entries.map((e) => _FieldTile(
-                  label: e.key,
-                  value: e.value,
-                )),
+            ...r.fields.entries.map((e) {
+              final fieldDef = widget.categoryInfo?.fields
+                  .where((f) => f.key == e.key)
+                  .isNotEmpty == true
+                  ? widget.categoryInfo!.fields.firstWhere((f) => f.key == e.key)
+                  : null;
+              return _FieldTile(
+                label: fieldDef?.label ?? e.key,
+                value: e.value,
+                isSecret: fieldDef?.secret ?? false,
+              );
+            }),
             const SizedBox(height: 16),
           ],
 
@@ -592,7 +607,12 @@ class _RecordDetailScreenState extends State<RecordDetailScreen> {
 class _FieldTile extends StatefulWidget {
   final String label;
   final String value;
-  const _FieldTile({required this.label, required this.value});
+  final bool isSecret;
+  const _FieldTile({
+    required this.label,
+    required this.value,
+    this.isSecret = false,
+  });
 
   @override
   State<_FieldTile> createState() => _FieldTileState();
@@ -600,9 +620,12 @@ class _FieldTile extends StatefulWidget {
 
 class _FieldTileState extends State<_FieldTile> {
   bool _copied = false;
+  bool _revealed = false;
 
   @override
   Widget build(BuildContext context) {
+    final displayValue =
+        widget.isSecret && !_revealed ? '•' * 8 : widget.value;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -612,21 +635,40 @@ class _FieldTileState extends State<_FieldTile> {
       child: ListTile(
         title: Text(widget.label,
             style: TextStyle(color: context.textSecondary, fontSize: 12)),
-        subtitle: Text(widget.value,
+        subtitle: Text(displayValue,
             style: TextStyle(
-                color: context.textPrimary, fontSize: 15, fontWeight: FontWeight.w500)),
-        trailing: IconButton(
-          icon: Icon(
-            _copied ? Icons.check_rounded : Icons.copy_rounded,
-            color: _copied ? Colors.green : context.textHint,
-            size: 20,
-          ),
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: widget.value));
-            setState(() => _copied = true);
-            await Future.delayed(const Duration(seconds: 2));
-            if (mounted) setState(() => _copied = false);
-          },
+                color: context.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                letterSpacing: widget.isSecret && !_revealed ? 2 : 0)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.isSecret)
+              IconButton(
+                icon: Icon(
+                  _revealed ? Icons.visibility_off : Icons.visibility,
+                  color: context.textHint,
+                  size: 20,
+                ),
+                onPressed: () => setState(() => _revealed = !_revealed),
+                tooltip: _revealed ? 'Скрыть' : 'Показать',
+              ),
+            IconButton(
+              icon: Icon(
+                _copied ? Icons.check_rounded : Icons.copy_rounded,
+                color: _copied ? Colors.green : context.textHint,
+                size: 20,
+              ),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: widget.value));
+                setState(() => _copied = true);
+                await Future.delayed(const Duration(seconds: 2));
+                if (mounted) setState(() => _copied = false);
+              },
+              tooltip: 'Копировать',
+            ),
+          ],
         ),
       ),
     );

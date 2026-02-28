@@ -1,4 +1,5 @@
 from __future__ import annotations
+import mimetypes
 import customtkinter as ctk
 from typing import Callable, Optional
 
@@ -12,9 +13,10 @@ class RecordDialog(ctk.CTkToplevel):
     def __init__(
         self,
         master,
-        on_save: Callable[[Record, RecordData], None],
+        on_save: Callable[[Record, RecordData, list, list], None],
         record: Optional[Record] = None,
         data: Optional[RecordData] = None,
+        attachments: Optional[list] = None,
     ):
         super().__init__(master)
         self.on_save = on_save
@@ -25,9 +27,12 @@ class RecordDialog(ctk.CTkToplevel):
         self._custom_rows: list[tuple[ctk.StringVar, ctk.StringVar]] = []
         self._secret_entries: dict[str, ctk.CTkEntry] = {}
         self._revealed: dict[str, bool] = {}
+        self._existing_atts: list[dict] = list(attachments or [])
+        self._removed_att_ids: list[int] = []
+        self._pending_files: list[dict] = []
 
         self.title("Редактировать запись" if self._is_edit else "Новая запись")
-        self.geometry("520x680")
+        self.geometry("520x740")
         self.resizable(False, True)
         self.configure(fg_color=BG)
         self.after(200, self.grab_set)
@@ -132,6 +137,20 @@ class RecordDialog(ctk.CTkToplevel):
         if self._data.notes:
             self._notes.insert("1.0", self._data.notes)
 
+        self._section(body, "Файлы и фото")
+        self._att_list_frame = ctk.CTkFrame(body, fg_color="transparent")
+
+        self._attach_btn = ctk.CTkButton(
+            body, text="📎  Прикрепить файл",
+            font=FONT_SMALL, height=32,
+            fg_color="transparent", text_color=ACCENT,
+            hover_color=CARD_HOVER, border_color=ACCENT,
+            border_width=1, corner_radius=RADIUS_SM,
+            command=self._pick_file,
+        )
+        self._attach_btn.pack(anchor="w", padx=PAD, pady=(PAD_SM, 0))
+        self._render_att_list()
+
         ctk.CTkButton(
             body, text="+ Добавить поле",
             font=FONT_SMALL, height=32,
@@ -163,6 +182,113 @@ class RecordDialog(ctk.CTkToplevel):
             corner_radius=RADIUS_SM, font=(FONT_FAMILY, 13, "bold"),
             command=self._save,
         ).pack(side="right", pady=12)
+
+
+    def _render_att_list(self) -> None:
+        """Перерисовывает список вложений. Фрейм скрыт когда файлов нет."""
+        for w in self._att_list_frame.winfo_children():
+            w.destroy()
+
+        active_atts = [a for a in self._existing_atts if a["id"] not in self._removed_att_ids]
+        has_items = bool(active_atts or self._pending_files)
+
+        if has_items:
+            self._att_list_frame.pack(fill="x", padx=PAD, pady=(4, 0),
+                                      before=self._attach_btn)
+        else:
+            self._att_list_frame.pack_forget()
+            return
+
+        def _file_icon(mime: str) -> str:
+            if mime.startswith("image/"):               return "🖼"
+            if "pdf" in mime:                           return "📄"
+            if "word" in mime or "doc" in mime:         return "📝"
+            if "sheet" in mime or "excel" in mime or "xlsx" in mime: return "📊"
+            return "📎"
+
+        def _size_str(size: int) -> str:
+            if size < 1024:            return f"{size} Б"
+            if size < 1024 * 1024:    return f"{size // 1024} КБ"
+            return f"{size / 1024 / 1024:.1f} МБ"
+
+        for att in active_atts:
+            row = ctk.CTkFrame(self._att_list_frame, fg_color=SURFACE, corner_radius=RADIUS_SM)
+            row.pack(fill="x", pady=(0, 4))
+            ctk.CTkLabel(row, text=_file_icon(att.get("mimetype", "")),
+                         font=("Segoe UI Emoji", 16), width=32,
+                         ).pack(side="left", padx=(PAD_SM, 0), pady=4)
+            ctk.CTkLabel(row, text=att["filename"],
+                         font=FONT_BODY, text_color=TEXT, anchor="w",
+                         ).pack(side="left", fill="x", expand=True, padx=PAD_SM)
+            ctk.CTkLabel(row, text=_size_str(att.get("size", 0)),
+                         font=FONT_SMALL, text_color=TEXT_SUB,
+                         ).pack(side="left", padx=PAD_SM)
+            att_id = att["id"]
+            ctk.CTkButton(row, text="✕", width=30, height=30,
+                          fg_color="transparent", text_color=DANGER, hover_color=CARD_HOVER,
+                          command=lambda aid=att_id: self._remove_existing(aid),
+                          ).pack(side="right", padx=(0, PAD_SM))
+
+        for i, pf in enumerate(self._pending_files):
+            row = ctk.CTkFrame(self._att_list_frame, fg_color=CARD, corner_radius=RADIUS_SM)
+            row.pack(fill="x", pady=(0, 4))
+            ctk.CTkLabel(row, text=_file_icon(pf["mimetype"]),
+                         font=("Segoe UI Emoji", 16), width=32,
+                         ).pack(side="left", padx=(PAD_SM, 0), pady=4)
+            ctk.CTkLabel(row, text=pf["name"],
+                         font=FONT_BODY, text_color=TEXT, anchor="w",
+                         ).pack(side="left", fill="x", expand=True, padx=PAD_SM)
+            ctk.CTkLabel(row, text=_size_str(len(pf["data"])),
+                         font=FONT_SMALL, text_color=TEXT_SUB,
+                         ).pack(side="left", padx=PAD_SM)
+            ctk.CTkLabel(row, text="новый", font=FONT_SMALL, text_color=ACCENT,
+                         ).pack(side="left", padx=(0, PAD_SM))
+            idx = i
+            ctk.CTkButton(row, text="✕", width=30, height=30,
+                          fg_color="transparent", text_color=DANGER, hover_color=CARD_HOVER,
+                          command=lambda ix=idx: self._remove_pending(ix),
+                          ).pack(side="right", padx=(0, PAD_SM))
+
+    def _remove_existing(self, att_id: int) -> None:
+        self._removed_att_ids.append(att_id)
+        self._render_att_list()
+
+    def _remove_pending(self, idx: int) -> None:
+        if 0 <= idx < len(self._pending_files):
+            self._pending_files.pop(idx)
+        self._render_att_list()
+
+    def _pick_file(self) -> None:
+        import tkinter.filedialog as fd
+        paths = fd.askopenfilenames(
+            title="Выберите файл(ы)",
+            filetypes=[
+                ("Все файлы", "*.*"),
+                ("Изображения", "*.png *.jpg *.jpeg *.gif *.bmp *.webp"),
+                ("PDF", "*.pdf"),
+                ("Документы", "*.doc *.docx *.xlsx *.txt"),
+            ],
+        )
+        for path in paths:
+            try:
+                from pathlib import Path
+                data = Path(path).read_bytes()
+                if len(data) > 20 * 1024 * 1024:
+                    from src.ui.components.message_dialog import show_error
+                    show_error(self, "Файл слишком большой",
+                               f"{Path(path).name}\nМаксимальный размер: 20 МБ")
+                    continue
+                mime, _ = mimetypes.guess_type(path)
+                mime = mime or "application/octet-stream"
+                self._pending_files.append({
+                    "name": Path(path).name,
+                    "data": data,
+                    "mimetype": mime,
+                })
+            except Exception as e:
+                from src.ui.components.message_dialog import show_error
+                show_error(self, "Ошибка чтения файла", str(e))
+        self._render_att_list()
 
     def _expiry_label(self) -> str:
         v = self._expiry_var.get()
@@ -351,6 +477,9 @@ class RecordDialog(ctk.CTkToplevel):
     _CARD_TYPES = ["Visa", "Mastercard", "Мир", "UnionPay", "American Express", "Другая"]
 
     def _render_fields(self, category_key: str) -> None:
+        for k, v in self._field_vars.items():
+            self._data.fields[k] = v.get()
+
         for w in self._fields_frame.winfo_children():
             w.destroy()
         self._field_vars.clear()
@@ -445,5 +574,5 @@ class RecordDialog(ctk.CTkToplevel):
             self._record.expiry_date = self._expiry_var.get().strip() or None
             record = self._record
 
-        self.on_save(record, data)
+        self.on_save(record, data, self._pending_files, self._removed_att_ids)
         self.destroy()

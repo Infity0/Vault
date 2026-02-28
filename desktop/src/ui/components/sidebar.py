@@ -80,7 +80,6 @@ class _NavItem(ctk.CTkFrame):
                 text_color=self._normal_color, font=FONT_BODY)
 
     def set_badge(self, count: int) -> None:
-        base = self._key
         lbl = self._base_label
         if count > 0:
             self._text_lbl.configure(text=f"{lbl}  ● {count}")

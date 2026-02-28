@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -181,6 +182,7 @@ class ApiService {
       'file',
       bytes,
       filename: filename,
+      contentType: MediaType.parse(mimetype),
     ));
     final streamed = await req.send().timeout(const Duration(seconds: 30));
     final res = await http.Response.fromStream(streamed);

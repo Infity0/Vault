@@ -6,9 +6,10 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import io
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -311,7 +312,6 @@ def list_records(
     favorites: bool = False,
     session: dict = Depends(_get_session),
 ):
-    from datetime import date, datetime
     account_id = session["account_id"]
     with _db_lock:
         if favorites:
@@ -527,7 +527,6 @@ def download_attachment(attachment_id: int, session: dict = Depends(_get_session
     if att["account_id"] != session["account_id"]:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
-    import io
     return StreamingResponse(
         io.BytesIO(att["data"]),
         media_type=att["mimetype"],
@@ -549,7 +548,6 @@ def view_attachment(attachment_id: int, session: dict = Depends(_get_session)):
     if att["account_id"] != session["account_id"]:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
-    import io
     return StreamingResponse(
         io.BytesIO(att["data"]),
         media_type=att["mimetype"],

@@ -1,5 +1,9 @@
 from __future__ import annotations
 import os
+import sys
+import subprocess
+import threading
+import time as _time
 import ctypes
 
 try:
@@ -15,6 +19,103 @@ from src.ui.app import VaultApp
 from src.ui.login_frame import LoginFrame
 from src.ui.main_window import MainWindow
 from src.utils.constants import BG, WIN_W, WIN_H, WIN_MIN_W, WIN_MIN_H
+
+
+class _ServerManager:
+    """
+    Запускает server.py (FastAPI) как дочерний процесс и отслеживает его.
+    Статусы: stopped | starting | running | error
+    """
+
+    _STATUS_LABELS = {
+        "stopped":  ("⚫ Сервер выкл.",  "#778ca3"),
+        "starting": ("🟡 Запуск сервера…", "#f7b731"),
+        "running":  ("🟢 Сервер запущен", "#20bf6b"),
+        "error":    ("🔴 Ошибка сервера", "#fc5c65"),
+    }
+
+    def __init__(self) -> None:
+        self._proc: subprocess.Popen | None = None
+        self._status: str = "stopped"
+        self._callbacks: list = []
+
+    def start(self) -> None:
+        """Запустить сервер в фоне (безопасно вызывать повторно)."""
+        if self._proc and self._proc.poll() is None:
+            return
+        self._set_status("starting")
+        threading.Thread(target=self._launch, daemon=True,
+                         name="vault-server").start()
+
+    def stop(self) -> None:
+        """Остановить сервер (вызывается при закрытии десктопного приложения)."""
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._set_status("stopped")
+
+    def add_listener(self, cb) -> None:
+        """Подписаться на смену статуса. cb(status: str) вызывается из любого потока."""
+        self._callbacks.append(cb)
+        cb(self._status)
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @classmethod
+    def label_for(cls, status: str) -> tuple[str, str]:
+        return cls._STATUS_LABELS.get(status, ("⚫", "#778ca3"))
+
+    def _set_status(self, s: str) -> None:
+        self._status = s
+        for cb in list(self._callbacks):
+            try:
+                cb(s)
+            except Exception:
+                pass
+
+    def _launch(self) -> None:
+        server_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
+        cwd = os.path.dirname(os.path.abspath(__file__))
+        extra = {"creationflags": 0x08000000} if os.name == "nt" else {}
+
+        env = os.environ.copy()
+        try:
+            from src.ui.components.settings_dialog import load_mysql_config
+            cfg = load_mysql_config()
+            env["MYSQL_HOST"]     = cfg.host
+            env["MYSQL_PORT"]     = str(cfg.port)
+            env["MYSQL_USER"]     = cfg.user
+            env["MYSQL_PASSWORD"] = cfg.password
+            env["MYSQL_DATABASE"] = cfg.database
+        except Exception:
+            pass
+
+        try:
+            self._proc = subprocess.Popen(
+                [sys.executable, server_script],
+                cwd=cwd,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                **extra,
+            )
+        except Exception:
+            self._set_status("error")
+            return
+
+        _time.sleep(2)
+        if self._proc.poll() is None:
+            self._set_status("running")
+            self._proc.wait()
+            if self._status == "running":
+                self._set_status("error")
+        else:
+            self._set_status("error")
 
 
 def _set_taskbar_icon(window, ico_path: str) -> None:
@@ -60,6 +161,8 @@ class Root(ctk.CTk):
 
         self._center(440, 560)
 
+        self._server_mgr = _ServerManager()
+
         self._app = VaultApp()
         self._current_frame: ctk.CTkFrame | None = None
         self._show_login()
@@ -71,6 +174,8 @@ class Root(ctk.CTk):
                 "Невозможно подключиться к MySQL",
                 f"{self._app.startup_error}\n\nОткройте Настройки и проверьте данные подключения.",
             ))
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _center(self, w: int, h: int) -> None:
         self.update_idletasks()
@@ -118,6 +223,11 @@ class Root(ctk.CTk):
             self.after(0, self._open_vault)
         return None
 
+    def _on_close(self) -> None:
+        """Корректное завершение: сначала останавливаем сервер, потом закрываем окно."""
+        self._server_mgr.stop()
+        self.destroy()
+
     def _on_lock(self) -> None:
         self._app.lock_vault()
         self._show_login()
@@ -126,7 +236,8 @@ class Root(ctk.CTk):
         self._center(WIN_W, WIN_H)
         self.minsize(WIN_MIN_W, WIN_MIN_H)
         self.resizable(True, True)
-        frame = MainWindow(self, self._app, on_lock=self._on_lock)
+        frame = MainWindow(self, self._app, on_lock=self._on_lock,
+                           server_mgr=self._server_mgr)
         self._swap(frame)
 
 

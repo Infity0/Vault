@@ -22,9 +22,10 @@ def _get_local_ip() -> str:
         return "127.0.0.1"
 
 
-def show_qr_dialog(parent: ctk.CTk, port: int = 8080) -> None:
-    ip = _get_local_ip()
-    url = f"http://{ip}:{port}"
+def show_qr_dialog(parent: ctk.CTk, port: int = 8080, url: str = "") -> None:
+    if not url:
+        ip = _get_local_ip()
+        url = f"http://{ip}:{port}"
 
     win = ctk.CTkToplevel(parent)
     win.title("Подключить телефон")
@@ -65,8 +66,10 @@ def show_qr_dialog(parent: ctk.CTk, port: int = 8080) -> None:
         font=(FONT_FAMILY, 11), text_color=ACCENT,
     ).pack(pady=(10, 4))
 
+    is_local = any(x in url for x in ("127.0.0.1", "localhost", "192.168.", "10.", "172."))
+    hint = "Убедись, что телефон и ПК\nв одной Wi-Fi сети" if is_local else "API-сервер работает на VPS —\nтелефон подключится через интернет"
     ctk.CTkLabel(
-        win, text="Убедись, что телефон и ПК\nв одной Wi-Fi сети",
+        win, text=hint,
         font=FONT_SMALL, text_color=TEXT_SUB, justify="center",
     ).pack(pady=(0, 8))
 

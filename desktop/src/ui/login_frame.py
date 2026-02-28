@@ -1,4 +1,5 @@
 from __future__ import annotations
+import threading
 import customtkinter as ctk
 from typing import Callable, Optional
 
@@ -19,34 +20,25 @@ class LoginFrame(ctk.CTkFrame):
         self._on_unlock = on_unlock
         self._on_create = on_create
         self._panel: ctk.CTkFrame | None = None
-        self._focus_after_id = None   # ID pending after() для фокуса
+        self._focus_after_id = None
 
         if accounts:
             self._show_picker()
         else:
             self._show_create()
 
-    # ==================================================================
-    # Утилиты
-    # ==================================================================
-
     def _replace(self, new_panel: ctk.CTkFrame) -> None:
-        # Отменяем pending focus-after чтобы не стрелять по уничтоженным виджетам
         if self._panel and self._panel.winfo_exists():
             self._panel.destroy()
         self._panel = new_panel
         new_panel.pack(expand=True)
 
     def _schedule_focus(self, widget) -> None:
-        pass  # temporarily disabled
+        pass
 
     def _make_panel(self, width: int = 360) -> ctk.CTkFrame:
         p = ctk.CTkFrame(self, fg_color="transparent", width=width)
         return p
-
-    # ==================================================================
-    # Панель 1 — выбор аккаунта
-    # ==================================================================
 
     def _show_picker(self) -> None:
         p = self._make_panel(360)
@@ -61,7 +53,6 @@ class LoginFrame(ctk.CTkFrame):
             font=FONT_SMALL, text_color=TEXT_SUB,
         ).pack(pady=(4, 16))
 
-        # Список аккаунтов — обычный Frame, без CTkScrollableFrame
         list_box = ctk.CTkFrame(p, fg_color=SURFACE, corner_radius=RADIUS, width=340)
         list_box.pack(fill="x", pady=(0, 4))
         list_box.pack_propagate(False)
@@ -85,7 +76,6 @@ class LoginFrame(ctk.CTkFrame):
 
         ctk.CTkFrame(p, height=1, fg_color=BORDER).pack(fill="x", pady=14)
 
-        # Кнопка нового аккаунта
         ctk.CTkButton(
             p,
             text="＋  Создать новый аккаунт",
@@ -99,10 +89,6 @@ class LoginFrame(ctk.CTkFrame):
         ).pack(fill="x")
 
         self._replace(p)
-
-    # ==================================================================
-    # Панель 2 — ввод пароля
-    # ==================================================================
 
     def _show_unlock(self, username: str) -> None:
         p = self._make_panel(360)
@@ -175,15 +161,14 @@ class LoginFrame(ctk.CTkFrame):
             def do():
                 ok = self._on_unlock(username, pw)
                 if not ok:
-                    err_var.set("Неверный пароль. Попробуйте снова.")
-                    btn.configure(state="normal", text="Войти")
+                    self.after(0, lambda: err_var.set("Неверный пароль. Попробуйте снова."))
+                    self.after(0, lambda: btn.configure(state="normal", text="Войти"))
 
-            self.after(80, do)
+            threading.Thread(target=do, daemon=True).start()
 
         btn.configure(command=submit)
         pw_entry.bind("<Return>", lambda _: submit())
 
-        # Кнопка назад
         ctk.CTkButton(
             p, text="← Назад",
             height=36, font=FONT_SMALL,
@@ -194,10 +179,6 @@ class LoginFrame(ctk.CTkFrame):
 
         self._replace(p)
         self._schedule_focus(pw_entry)
-
-    # ==================================================================
-    # Панель 3 — создание аккаунта
-    # ==================================================================
 
     def _show_create(self) -> None:
         p = self._make_panel(360)
@@ -216,7 +197,6 @@ class LoginFrame(ctk.CTkFrame):
         form = ctk.CTkFrame(p, fg_color="transparent", width=340)
         form.pack(fill="x")
 
-        # Имя пользователя
         ctk.CTkLabel(
             form, text="Имя аккаунта",
             font=FONT_BODY, text_color=TEXT_SUB, anchor="w",
@@ -230,7 +210,6 @@ class LoginFrame(ctk.CTkFrame):
         )
         name_entry.pack(fill="x", pady=(4, 12))
 
-        # Пароль
         ctk.CTkLabel(
             form, text="Мастер-пароль",
             font=FONT_BODY, text_color=TEXT_SUB, anchor="w",
@@ -259,7 +238,6 @@ class LoginFrame(ctk.CTkFrame):
             command=toggle,
         ).pack(side="left", padx=(4, 0))
 
-        # Подтверждение пароля
         ctk.CTkLabel(
             form, text="Подтвердите пароль",
             font=FONT_BODY, text_color=TEXT_SUB, anchor="w",
@@ -316,18 +294,17 @@ class LoginFrame(ctk.CTkFrame):
 
             def do():
                 result = self._on_create(name, pw)
-                if result:  # строка = ошибка
-                    err_var.set(result)
-                    btn.configure(state="normal", text="Создать аккаунт")
+                if result:
+                    self.after(0, lambda: err_var.set(result))
+                    self.after(0, lambda: btn.configure(state="normal", text="Создать аккаунт"))
 
-            self.after(80, do)
+            threading.Thread(target=do, daemon=True).start()
 
         btn.configure(command=submit)
         confirm_entry.bind("<Return>", lambda _: submit())
         name_entry.bind("<Return>", lambda _: pw_entry.focus())
         pw_entry.bind("<Return>", lambda _: confirm_entry.focus())
 
-        # Кнопка назад (если аккаунты уже есть)
         if self._accounts:
             ctk.CTkButton(
                 p, text="← Назад",

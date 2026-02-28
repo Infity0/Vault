@@ -1,4 +1,5 @@
 from __future__ import annotations
+import threading
 import tkinter as tk
 import customtkinter as ctk
 from typing import TYPE_CHECKING, Callable, Optional
@@ -105,6 +106,15 @@ class DetailPanel(ctk.CTkFrame):
             font=FONT_SECTION, text_color=TEXT_SUB,
         )
         self._empty.pack(expand=True)
+
+    def show_loading(self) -> None:
+        for w in self.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(
+            self,
+            text="Загрузка…",
+            font=FONT_SECTION, text_color=TEXT_SUB,
+        ).pack(expand=True)
 
     def show(self, record: Record, data: RecordData) -> None:
         self._record = record
@@ -245,10 +255,21 @@ class DetailPanel(ctk.CTkFrame):
         def _refresh():
             for w in att_container.winfo_children():
                 w.destroy()
-            try:
-                attachments = self._app.get_attachments(self._record.id)
-            except Exception:
-                attachments = []
+            ctk.CTkLabel(att_container, text="Загрузка…", font=FONT_BODY,
+                         text_color=TEXT_SUB, anchor="w").pack(fill="x")
+
+            def _fetch():
+                try:
+                    attachments = self._app.get_attachments(self._record.id)
+                except Exception:
+                    attachments = []
+                att_container.after(0, lambda: _render(attachments))
+
+            threading.Thread(target=_fetch, daemon=True).start()
+
+        def _render(attachments):
+            for w in att_container.winfo_children():
+                w.destroy()
 
             if not attachments:
                 ctk.CTkLabel(
@@ -285,43 +306,46 @@ class DetailPanel(ctk.CTkFrame):
                 att_is_image = is_image
 
                 def _open(aid=att_id, aname=att_name, amime=att_mime, aimg=att_is_image, aext=fext):
-                    try:
-                        data_bytes = self._app.get_attachment_data(aid)
-                    except Exception as e:
-                        mb.showerror("Ошибка", str(e))
-                        return
-
-                    if aimg:
-                        _show_image_preview(self, aname, data_bytes)
-                    else:
-                        import tempfile, subprocess, threading
-                        ext = os.path.splitext(aname)[1] or aext
-                        with tempfile.NamedTemporaryFile(
-                            delete=False, suffix=ext
-                        ) as tmp:
-                            tmp.write(data_bytes)
-                            tmp_path = tmp.name
+                    def _fetch_data():
                         try:
-                            os.startfile(tmp_path)
-                        except Exception:
-                            subprocess.Popen(["explorer", tmp_path])
-                        # Удаляем временный файл через 60 сек (после того как ОС успеет открыть)
-                        def _cleanup(p=tmp_path):
-                            try:
-                                os.remove(p)
-                            except Exception:
-                                pass
-                        threading.Timer(60.0, _cleanup).start()
+                            data_bytes = self._app.get_attachment_data(aid)
+                        except Exception as e:
+                            att_container.after(0, lambda: mb.showerror("Ошибка", str(e)))
+                            return
+                        if aimg:
+                            att_container.after(0, lambda: _show_image_preview(att_container, aname, data_bytes))
+                        else:
+                            import tempfile, subprocess
+                            ext = os.path.splitext(aname)[1] or aext
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                                tmp.write(data_bytes)
+                                tmp_path = tmp.name
+                            def _open_file():
+                                try:
+                                    os.startfile(tmp_path)
+                                except Exception:
+                                    subprocess.Popen(["explorer", tmp_path])
+                                threading.Timer(60.0, lambda: _try_remove(tmp_path)).start()
+                            att_container.after(0, _open_file)
+                    threading.Thread(target=_fetch_data, daemon=True).start()
+
+                def _try_remove(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
 
                 def _download(aid=att_id, aname=att_name):
                     dest_dir = fd.askdirectory(title="Выберите папку для сохранения")
                     if not dest_dir:
                         return
-                    try:
-                        saved = self._app.download_attachment(aid, dest_dir)
-                        mb.showinfo("Сохранено", f"Файл сохранён:\n{saved}")
-                    except Exception as e:
-                        mb.showerror("Ошибка", str(e))
+                    def _fetch_dl():
+                        try:
+                            saved = self._app.download_attachment(aid, dest_dir)
+                            att_container.after(0, lambda: mb.showinfo("Сохранено", f"Файл сохранён:\n{saved}"))
+                        except Exception as e:
+                            att_container.after(0, lambda: mb.showerror("Ошибка", str(e)))
+                    threading.Thread(target=_fetch_dl, daemon=True).start()
 
                 def _del(aid=att_id, aname=att_name):
                     if not mb.askyesno(
@@ -329,12 +353,13 @@ class DetailPanel(ctk.CTkFrame):
                         icon="warning",
                     ):
                         return
-                    try:
-                        self._app.delete_attachment(aid)
-                        _refresh()
-                    except Exception as e:
-                        mb.showerror("Ошибка", str(e))
-
+                    def _fetch_del():
+                        try:
+                            self._app.delete_attachment(aid)
+                            att_container.after(0, _refresh)
+                        except Exception as e:
+                            att_container.after(0, lambda: mb.showerror("Ошибка", str(e)))
+                    threading.Thread(target=_fetch_del, daemon=True).start()
 
                 del_btn = ctk.CTkButton(
                     row, text="🗑", width=30, height=28,
@@ -394,11 +419,16 @@ class DetailPanel(ctk.CTkFrame):
             )
             if not path:
                 return
-            try:
-                self._app.upload_attachment(self._record.id, path)
-                _refresh()
-            except Exception as e:
-                mb.showerror("Ошибка загрузки", str(e))
+            attach_btn.configure(state="disabled", text="Загрузка…")
+            def _do_upload(p=path):
+                try:
+                    self._app.upload_attachment(self._record.id, p)
+                    att_container.after(0, _refresh)
+                except Exception as e:
+                    att_container.after(0, lambda: mb.showerror("Ошибка загрузки", str(e)))
+                finally:
+                    att_container.after(0, lambda: attach_btn.configure(state="normal", text="📎 Прикрепить"))
+            threading.Thread(target=_do_upload, daemon=True).start()
 
         attach_btn.configure(command=_upload)
 

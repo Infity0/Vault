@@ -1,5 +1,6 @@
 # ── Python / Desktop ──────────────────────────────────────────
 desktop/.venv/
+desktop/.vscode/
 desktop/__pycache__/
 desktop/src/**/__pycache__/
 desktop/build/

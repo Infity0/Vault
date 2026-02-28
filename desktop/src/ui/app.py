@@ -108,14 +108,21 @@ class VaultApp:
         return self.db.get_all_records(self._account_id)
 
     def get_records_by_category(self, category: str) -> list[Record]:
+        return self.filter_by_category(category, self.db.get_all_records(self._account_id))
+
+    def count_expiring(self) -> int:
+        return len(self.filter_by_category("expiring", self.db.get_all_records(self._account_id)))
+
+    def filter_by_category(self, category: str, records: list[Record]) -> list[Record]:
+        """Фильтрует уже загруженный список записей без запросов к БД."""
         if category == "all":
-            return self.db.get_all_records(self._account_id)
+            return list(records)
         if category == "favorites":
-            return [r for r in self.db.get_all_records(self._account_id) if r.is_favorite]
+            return [r for r in records if r.is_favorite]
         if category == "expiring":
             today = date.today()
             result: list[Record] = []
-            for r in self.db.get_all_records(self._account_id):
+            for r in records:
                 if not r.expiry_date:
                     continue
                 try:
@@ -125,10 +132,12 @@ class VaultApp:
                 except ValueError:
                     pass
             return result
-        return self.db.get_records_by_category(category, self._account_id)
+        return [r for r in records if r.category == category]
 
-    def count_expiring(self) -> int:
-        return len(self.get_records_by_category("expiring"))
+    def filter_search(self, query: str, records: list[Record]) -> list[Record]:
+        """Поиск по заголовку в уже загруженном списке — без запросов к БД."""
+        q = query.lower()
+        return [r for r in records if q in r.title.lower()]
 
     def decrypt_record(self, record: Record) -> RecordData:
         raw = self.crypto.decrypt(record.encrypted_data)
@@ -189,6 +198,19 @@ class VaultApp:
 
     def get_attachments(self, record_id: int) -> list[dict]:
         return self.db.get_attachments(record_id)
+
+    def upload_attachment_bytes(self, record_id: int, filename: str,
+                                data: bytes, mimetype: str) -> None:
+        """Загружает вложение из буфера памяти (используется из диалога записи)."""
+        if len(data) > 20 * 1024 * 1024:
+            raise ValueError("Файл слишком большой (максимум 20 МБ)")
+        self.db.insert_attachment(
+            record_id=record_id,
+            account_id=self._account_id,
+            filename=filename,
+            mimetype=mimetype,
+            data=data,
+        )
 
     def upload_attachment(self, record_id: int, file_path: str) -> dict:
         import mimetypes
